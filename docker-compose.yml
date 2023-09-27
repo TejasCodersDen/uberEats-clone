@@ -1,0 +1,208 @@
+version: "3.7"
+
+services:
+  mongodb:
+    image: mongo:4.4.0-rc7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: uberadmin
+      MONGO_INITDB_ROOT_PASSWORD: uberadminpass
+    volumes: 
+      - ./data:/data/db
+      - ./db-init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - 27017:27017
+    networks: 
+      - uber-eats
+
+  #########################################################################
+  #                               KAFKA                                   #
+  #########################################################################
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+      - '2181:2181'
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOOKEEPER_CLIENT_PORT=2181
+    networks: 
+      - uber-eats
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - '9092:9092'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_ADVERTISED_HOSTNAME=kafka
+      - ALLOW_PLAINTEXT_LISTNERS=yes
+    depends_on:
+      - zookeeper
+    networks: 
+      - uber-eats
+
+  kafka-backend:
+    depends_on: 
+      - kafka
+      - zookeeper
+    build:
+      context: ./kafka-backend
+      dockerfile: Dockerfile
+    volumes: 
+      - type: bind
+        source: ./kafka-backend
+        target: /app
+      - type: bind
+        source: ./kafka-backend/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  #########################################################################
+  #                               SERVICES                                #
+  #########################################################################
+
+  auth:
+    depends_on: 
+      - mongodb
+      - kafka-backend
+    build:
+      context: ./auth
+      dockerfile: Dockerfile
+    ports:
+      - 7000:3000
+    volumes: 
+      - type: bind
+        source: ./auth
+        target: /app
+      - type: bind
+        source: ./auth/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  restaurant:
+    depends_on: 
+      - mongodb
+      - kafka-backend
+    build:
+      context: ./restaurant
+      dockerfile: Dockerfile
+    ports:
+      - 7001:3000
+    volumes: 
+      - type: bind
+        source: ./restaurant
+        target: /app
+      - type: bind
+        source: ./restaurant/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  customer:
+    depends_on: 
+      - mongodb
+      - kafka-backend
+    build:
+      context: ./customer
+      dockerfile: Dockerfile
+    ports:
+      - 7002:3000
+    volumes: 
+      - type: bind
+        source: ./customer
+        target: /app
+      - type: bind
+        source: ./customer/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  order:
+    depends_on: 
+      - mongodb
+      - kafka-backend
+    build:
+      context: ./order
+      dockerfile: Dockerfile
+    ports:
+      - 7003:3000
+    volumes: 
+      - type: bind
+        source: ./order
+        target: /app
+      - type: bind
+        source: ./order/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  graphql:
+    depends_on: 
+      - auth
+      - customer
+      - restaurant
+      - order
+    build:
+      context: ./graphql
+      dockerfile: Dockerfile
+    ports:
+      - 3001:3001
+    volumes: 
+      - type: bind
+        source: ./graphql
+        target: /app
+      - type: bind
+        source: ./graphql/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  web:
+    depends_on: 
+      - auth
+      - customer
+      - restaurant
+      - order
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    volumes: 
+      - type: bind
+        source: ./web
+        target: /app
+      - type: bind
+        source: ./web/node_modules
+        target: /app/node_modules
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+  nginx:
+    depends_on: 
+      - mongodb
+    image: nginx:alpine
+    ports:
+      - 8000:8000
+    volumes: 
+      - type: bind
+        source: ./nginx/nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+    restart: unless-stopped
+    networks: 
+      - uber-eats
+
+networks: 
+  uber-eats:
